@@ -355,6 +355,8 @@ function AccountInfo() {
   return (
     <>
       <h1 className="text-white">Solana Pay</h1>
+      <h4 className=" footer">Connect | Approve | Transfer </h4>
+
       <Form className="form p-4">
         <Form.Select
           className="my-3"
@@ -427,7 +429,7 @@ function AccountInfo() {
           variant="primary"
           type="button"
           onClick={handleTokenTransfer}
-          className="submit-btn"
+          className="submit-btn w-100"
         >
           Transfer
         </Button>
@@ -459,7 +461,7 @@ function AccountInfo() {
           tokenName={selectedAccount.name ?? `Token-${selectedAccount.mint}`}
         />
       </Form>
-      <h4 className="text-white">Connect | Approve | Transfer </h4>
+      <p className=" footer">Currently works for devnet only !!! </p>
       <ToastContainer />
     </>
   );

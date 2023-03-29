@@ -1,11 +1,14 @@
 .form {
-    min-width: 300px;
+  min-width: 300px;
 }
 
 .submit-btn {
-    border-radius: 4px;
-    background-color: #1ED79A !important;
-    border-color: #1ED79A;
-    color: #1A4E3F;
-    }
-    
+  border-radius: 4px;
+  background-color: #1ed79a !important;
+  border-color: #1ed79a;
+  color: #0e3b2e !important;
+}
+
+.footer {
+  color: #1ED79A !important;
+}
