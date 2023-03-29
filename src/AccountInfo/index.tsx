@@ -8,10 +8,13 @@ import {
   PublicKey,
   Transaction,
 } from '@solana/web3.js';
-import { Button, Form } from 'react-bootstrap';
+import { Button, Form, Modal } from 'react-bootstrap';
 import {
+  createAssociatedTokenAccountInstruction,
   createTransferInstruction,
+  getAssociatedTokenAddress,
   getOrCreateAssociatedTokenAccount,
+  TokenAccountNotFoundError,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
 import { SOLANA_LOGO_URI } from '../Utils/constants';
@@ -43,6 +46,8 @@ function AccountInfo() {
   const [selectedAccount, setSelectedAccount] = useState<number>(-1);
   const [destAddress, setDestAddress] = useState('');
   const [transferAmount, setTransferAmount] = useState(0);
+  const [showTokenAccCreationModal, setShowTokenAccCreationModal] =
+    useState(false);
 
   useEffect(() => {
     setTokenAccounts([]);
@@ -170,9 +175,7 @@ function AccountInfo() {
     });
   }, [connection, publicKey]);
 
-  const handleTokenTransfer = async (
-    e: React.MouseEvent<HTMLButtonElement, MouseEvent>
-  ) => {
+  const handleTokenTransfer = async () => {
     const toWalletPublicKey = new PublicKey(destAddress);
 
     // Generate a new wallet keypair
@@ -188,32 +191,95 @@ function AccountInfo() {
       publicKey!!
     );
 
-    // Get the token account of the toWallet address, and if it does not exist, create it
-    const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      fromWallet,
-      mint,
-      toWalletPublicKey
+    try {
+      // Get the token account of the toWallet address, and if it does not exist, create it
+      const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
+        connection,
+        fromWallet,
+        mint,
+        toWalletPublicKey
+      );
+
+      const transaction = new Transaction();
+
+      transaction.add(
+        createTransferInstruction(
+          sourceTokenAccount.address,
+          destinationTokenAccount.address,
+          publicKey!!,
+          transferAmount *
+            Math.pow(10, tokenAccounts[selectedAccount].decimalPlaces)
+        )
+      );
+
+      const signature = await sendTransaction(transaction, connection);
+      console.log('Signature', signature);
+    } catch (e) {
+      if (e instanceof TokenAccountNotFoundError) {
+        console.log('from TokenAccountNotFoundError');
+        setShowTokenAccCreationModal(true);
+      }
+    }
+  };
+
+  const handleClose = () => {
+    setShowTokenAccCreationModal(false);
+  };
+
+  const handleCreateAssociateTokenAcc = async () => {
+    handleClose();
+    const destPublicKey = new PublicKey(destAddress);
+    const mintPublicKey = new PublicKey(tokenAccounts[selectedAccount].mint);
+
+    const associatedTokenAddress = await getAssociatedTokenAddress(
+      mintPublicKey,
+      destPublicKey,
+      false
     );
 
     const transaction = new Transaction();
 
     transaction.add(
-      createTransferInstruction(
-        sourceTokenAccount.address,
-        destinationTokenAccount.address,
+      createAssociatedTokenAccountInstruction(
         publicKey!!,
-        transferAmount *
-          Math.pow(10, tokenAccounts[selectedAccount].decimalPlaces)
+        associatedTokenAddress,
+        destPublicKey,
+        mintPublicKey
       )
     );
-    const signature = await sendTransaction(transaction, connection).catch(
-      (e) => {
-        throw new WalletSendTransactionError();
-      }
+
+    const signature = await sendTransaction(transaction, connection).then(() =>
+      // TODO: Render a modal to indicate ATA creation successful and ask user to continue with transfer
+      handleTokenTransfer()
     );
     console.log('Signature', signature);
   };
+
+  const renderTokenAccountCreationModal = () => (
+    <Modal show={showTokenAccCreationModal} onHide={handleClose} centered>
+      <Modal.Header closeButton>
+        <Modal.Title>Create associated token account</Modal.Title>
+      </Modal.Header>
+      <Modal.Body>
+        The reciever {destAddress} doesn't have an associated token account
+        <br />
+        <br />
+        do you want to create an associated token account for the provided
+        destination address ?
+      </Modal.Body>
+      <Modal.Footer>
+        <Button variant="secondary" onClick={handleClose}>
+          No
+          {/**
+           * TODO : Show error toast on selecting NO
+           */}
+        </Button>
+        <Button variant="primary" onClick={handleCreateAssociateTokenAcc}>
+          Yes
+        </Button>
+      </Modal.Footer>
+    </Modal>
+  );
 
   return (
     <Form className="form">
@@ -269,6 +335,7 @@ function AccountInfo() {
       <Button variant="primary" type="button" onClick={handleTokenTransfer}>
         Transfer
       </Button>
+      {renderTokenAccountCreationModal()}
     </Form>
   );
 }
