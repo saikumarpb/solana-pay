@@ -3,11 +3,17 @@ import './styles.css';
 import {
   Connection,
   GetProgramAccountsFilter,
+  Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
+  Transaction,
 } from '@solana/web3.js';
 import { Button, Form } from 'react-bootstrap';
-import { TOKEN_PROGRAM_ID } from '@solana/spl-token';
+import {
+  createTransferInstruction,
+  getOrCreateAssociatedTokenAccount,
+  TOKEN_PROGRAM_ID,
+} from '@solana/spl-token';
 import { SOLANA_LOGO_URI } from '../Utils/constants';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import {
@@ -17,6 +23,7 @@ import {
   TokenListProvider,
 } from '@solana/spl-token-registry';
 import { Metadata } from '@metaplex-foundation/mpl-token-metadata';
+import { WalletSendTransactionError } from '@solana/wallet-adapter-base';
 
 interface TokenAccount {
   owner: string;
@@ -30,11 +37,12 @@ interface TokenAccount {
 
 function AccountInfo() {
   const { connection } = useConnection();
-  const { publicKey } = useWallet();
+  const { publicKey, sendTransaction } = useWallet();
   const [tokenMap, setTokenMap] = useState<Map<string, TokenInfo>>(new Map());
   const [tokenAccounts, setTokenAccounts] = useState<TokenAccount[]>([]);
   const [selectedAccount, setSelectedAccount] = useState<number>(-1);
   const [destAddress, setDestAddress] = useState('');
+  const [transferAmount, setTransferAmount] = useState(0);
 
   useEffect(() => {
     setTokenAccounts([]);
@@ -64,7 +72,7 @@ function AccountInfo() {
       connection.getBalance(publicKey).then((solBalance) => {
         let solTokenAccount: TokenAccount = {
           owner: publicKey.toString(),
-          mint: '',
+          mint: 'SOLANA_MINT',
           balance: solBalance / LAMPORTS_PER_SOL,
           decimalPlaces: 9,
           name: 'Solana',
@@ -162,6 +170,51 @@ function AccountInfo() {
     });
   }, [connection, publicKey]);
 
+  const handleTokenTransfer = async (
+    e: React.MouseEvent<HTMLButtonElement, MouseEvent>
+  ) => {
+    const toWalletPublicKey = new PublicKey(destAddress);
+
+    // Generate a new wallet keypair
+    const fromWallet = Keypair.generate();
+
+    const mint = new PublicKey(tokenAccounts[selectedAccount].mint);
+
+    // Get the token account of the fromWallet address, and if it does not exist, create it
+    const sourceTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      fromWallet,
+      mint,
+      publicKey!!
+    );
+
+    // Get the token account of the toWallet address, and if it does not exist, create it
+    const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
+      connection,
+      fromWallet,
+      mint,
+      toWalletPublicKey
+    );
+
+    const transaction = new Transaction();
+
+    transaction.add(
+      createTransferInstruction(
+        sourceTokenAccount.address,
+        destinationTokenAccount.address,
+        publicKey!!,
+        transferAmount *
+          Math.pow(10, tokenAccounts[selectedAccount].decimalPlaces)
+      )
+    );
+    const signature = await sendTransaction(transaction, connection).catch(
+      (e) => {
+        throw new WalletSendTransactionError();
+      }
+    );
+    console.log('Signature', signature);
+  };
+
   return (
     <Form className="form">
       <Form.Select
@@ -194,6 +247,15 @@ function AccountInfo() {
       </Form.Group>
 
       <Form.Group className="mb-3 text-white">
+        <Form.Label>Transfer amount</Form.Label>
+        <Form.Control
+          type="number"
+          value={transferAmount}
+          onChange={(e) => setTransferAmount(parseFloat(e.target.value))}
+        />
+      </Form.Group>
+
+      <Form.Group className="mb-3 text-white">
         <Form.Label>Reciever Address</Form.Label>
         <Form.Control
           type="text"
@@ -204,8 +266,8 @@ function AccountInfo() {
           }}
         />
       </Form.Group>
-      <Button variant="primary" type="submit">
-        Submit
+      <Button variant="primary" type="button" onClick={handleTokenTransfer}>
+        Transfer
       </Button>
     </Form>
   );
