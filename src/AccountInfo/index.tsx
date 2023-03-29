@@ -6,6 +6,7 @@ import {
   Keypair,
   LAMPORTS_PER_SOL,
   PublicKey,
+  SystemProgram,
   Transaction,
 } from '@solana/web3.js';
 import { Button, Form } from 'react-bootstrap';
@@ -32,6 +33,9 @@ import { Metadata } from '@metaplex-foundation/mpl-token-metadata';
 import TokenAccCreationModal from './TokenAccCreationModal';
 import TokenTransferModal from './TokenTransferModal';
 import TransferSuccessModal from './TransferSuccessModal';
+import { toast, ToastContainer } from 'react-toastify';
+import 'react-toastify/dist/ReactToastify.css';
+import { WalletSendTransactionError } from '@solana/wallet-adapter-base';
 
 interface TokenAccount {
   owner: string;
@@ -44,7 +48,7 @@ interface TokenAccount {
 }
 
 function AccountInfo() {
-  const tokenAccInitialState = {
+  const tokenAccInitialState: TokenAccount = {
     balance: 0,
     decimalPlaces: 0,
     mint: '',
@@ -57,6 +61,8 @@ function AccountInfo() {
   const [selectedAccount, setSelectedAccount] =
     useState<TokenAccount>(tokenAccInitialState);
   const [destAddress, setDestAddress] = useState('');
+  const [isValidAddress, setIsValidAddress] = useState(true);
+  const [isValidAmount, setIsValidAmount] = useState(true);
   const [transferAmount, setTransferAmount] = useState(0);
   const [explorerLink, setExplorerLink] = useState('');
   const [transferStatus, setTransferStatus] = useState(false);
@@ -82,6 +88,23 @@ function AccountInfo() {
     });
   }, []);
 
+  /**
+   * Validates the address provided
+   * @param address public wallet address
+   */
+  const validateSolanaAddress = (address: string) => {
+    try {
+      let publicKey = new PublicKey(address);
+      let isSolana = PublicKey.isOnCurve(publicKey);
+      setIsValidAddress(() => isSolana);
+
+      return isSolana;
+    } catch (error) {
+      setIsValidAddress(() => false);
+      return false;
+    }
+  };
+
   async function getTokenAccounts(
     wallet: string,
     solanaConnection: Connection
@@ -93,7 +116,7 @@ function AccountInfo() {
           owner: publicKey.toString(),
           mint: 'SOLANA_MINT',
           balance: solBalance / LAMPORTS_PER_SOL,
-          decimalPlaces: 9,
+          decimalPlaces: 10,
           name: 'Solana',
           symbol: 'SOL',
           logoURI: SOLANA_LOGO_URI,
@@ -120,7 +143,7 @@ function AccountInfo() {
       { filters: filters }
     );
 
-    accounts.forEach(async (account, i) => {
+    accounts.forEach(async (account) => {
       let tokenAccount: TokenAccount = {
         owner: '',
         mint: '',
@@ -190,52 +213,103 @@ function AccountInfo() {
   }, [connection, publicKey]);
 
   const handleTokenTransfer = async () => {
-    const toWalletPublicKey = new PublicKey(destAddress);
-
-    // Generate a new wallet keypair
-    const fromWallet = Keypair.generate();
-
-    const mint = new PublicKey(selectedAccount?.mint ?? '');
-
-    // Get the token account of the fromWallet address, and if it does not exist, create it
-    const sourceTokenAccount = await getOrCreateAssociatedTokenAccount(
-      connection,
-      fromWallet,
-      mint,
-      publicKey!!
-    );
-
-    try {
-      // Get the token account of the toWallet address, and if it does not exist, create it
-      const destinationTokenAccount = await getOrCreateAssociatedTokenAccount(
-        connection,
-        fromWallet,
-        mint,
-        toWalletPublicKey
-      );
-
-      const transaction = new Transaction();
-
-      transaction.add(
-        createTransferInstruction(
-          sourceTokenAccount.address,
-          destinationTokenAccount.address,
-          publicKey!!,
-          transferAmount * Math.pow(10, selectedAccount?.decimalPlaces ?? 0)
-        )
-      );
-
-      await sendTransaction(transaction, connection).then((data) => {
-        setExplorerLink(
-          `https://explorer.solana.com/tx/${data}?cluster=devnet`
-        );
-        setTransferStatus(true);
+    if (!publicKey) {
+      toast.error('Connect the wallet to make a transfer', {
+        position: 'bottom-right',
+        autoClose: 3000,
       });
-      setSelectedAccount(tokenAccInitialState);
+      return;
+    }
+
+    if (!selectedAccount.mint) {
+      toast.error('Select a token to make a transfer', {
+        position: 'bottom-right',
+        autoClose: 3000,
+      });
+      return;
+    }
+    // validate transfer amount
+    transferAmount > selectedAccount.balance && setIsValidAmount(false);
+    try {
+      if (validateSolanaAddress(destAddress)) {
+        if (selectedAccount.name === 'Solana') {
+          const transaction = new Transaction();
+          const recipientPubKey = new PublicKey(destAddress);
+
+          const sendSolInstruction = SystemProgram.transfer({
+            fromPubkey: publicKey!!,
+            toPubkey: recipientPubKey,
+            lamports: LAMPORTS_PER_SOL * transferAmount,
+          });
+
+          transaction.add(sendSolInstruction);
+          sendTransaction(transaction, connection)
+            .then((sig) => {
+              setExplorerLink(
+                `https://explorer.solana.com/tx/${sig}?cluster=devnet`
+              );
+              setTransferStatus(true);
+            })
+            .catch((e) => {
+              if (e instanceof WalletSendTransactionError) {
+                toast.error('Transaction failed', { position: 'bottom-right' });
+              }
+            });
+        }
+
+        const toWalletPublicKey = new PublicKey(destAddress);
+
+        // Generate a new wallet keypair
+        const fromWallet = Keypair.generate();
+
+        const mint = new PublicKey(selectedAccount?.mint ?? '');
+
+        // Get the token account of the fromWallet address, and if it does not exist, create it
+        const sourceTokenAccount = await getOrCreateAssociatedTokenAccount(
+          connection,
+          fromWallet,
+          mint,
+          publicKey!!
+        );
+
+        try {
+          // Get the token account of the toWallet address, and if it does not exist, create it
+          const destinationTokenAccount =
+            await getOrCreateAssociatedTokenAccount(
+              connection,
+              fromWallet,
+              mint,
+              toWalletPublicKey
+            );
+
+          const transaction = new Transaction();
+
+          transaction.add(
+            createTransferInstruction(
+              sourceTokenAccount.address,
+              destinationTokenAccount.address,
+              publicKey!!,
+              transferAmount * Math.pow(10, selectedAccount?.decimalPlaces ?? 0)
+            )
+          );
+
+          await sendTransaction(transaction, connection).then((data) => {
+            setExplorerLink(
+              `https://explorer.solana.com/tx/${data}?cluster=devnet`
+            );
+            setTransferStatus(true);
+          });
+          setSelectedAccount(tokenAccInitialState);
+        } catch (e) {
+          if (e instanceof TokenAccountNotFoundError) {
+            console.log('from TokenAccountNotFoundError');
+            setAtaStatus('INITIALIZED');
+          }
+        }
+      }
     } catch (e) {
-      if (e instanceof TokenAccountNotFoundError) {
-        console.log('from TokenAccountNotFoundError');
-        setAtaStatus('INITIALIZED');
+      if (e instanceof WalletSendTransactionError) {
+        toast.error('Transaction failed', { position: 'bottom-right' });
       }
     }
   };
@@ -279,87 +353,115 @@ function AccountInfo() {
   };
 
   return (
-    <Form className="form">
-      <Form.Select
-        className="my-3"
-        value={JSON.stringify(selectedAccount)}
-        onChange={(e) => {
-          setSelectedAccount(JSON.parse(e.target.value) as unknown as TokenAccount);
-        }}
-      >
-        <option key={-1} value={-1}>
-          Select token account
-        </option>
-        {tokenAccounts.map((tokenAccount, index) => (
-          <option key={index} value={JSON.stringify(tokenAccount)}>
-            {tokenAccount.name ?? `Token-${tokenAccount.mint.slice(0, 10)}`}
-          </option>
-        ))}
-      </Form.Select>
-
-      <Form.Group className="mb-3 text-white">
-        <Form.Label>Available Balance</Form.Label>
-        <Form.Control
-          type="text"
-          placeholder="Available Balance"
-          value={selectedAccount?.balance ?? '--'}
-          aria-label="Disabled input example"
-          disabled
-          readOnly
-        />
-      </Form.Group>
-
-      <Form.Group className="mb-3 text-white">
-        <Form.Label>Transfer amount</Form.Label>
-        <Form.Control
-          type="number"
-          value={transferAmount}
-          onChange={(e) => setTransferAmount(parseFloat(e.target.value))}
-        />
-      </Form.Group>
-
-      <Form.Group className="mb-3 text-white">
-        <Form.Label>Reciever Address</Form.Label>
-        <Form.Control
-          type="text"
-          placeholder="Enter reciever address"
-          value={destAddress}
+    <>
+      <h1 className="text-white">Solana Pay</h1>
+      <Form className="form p-4">
+        <Form.Select
+          className="my-3"
+          value={JSON.stringify(selectedAccount)}
           onChange={(e) => {
-            setDestAddress(e.target.value);
+            console.log(selectedAccount);
+            setSelectedAccount(
+              JSON.parse(e.target.value) as unknown as TokenAccount
+            );
           }}
+        >
+          <option key={-1} value={-1}>
+            Select token account
+          </option>
+          {tokenAccounts.map((tokenAccount, index) => (
+            <option key={index} value={JSON.stringify(tokenAccount)}>
+              {tokenAccount.name ?? `Token-${tokenAccount.mint.slice(0, 10)}`}
+            </option>
+          ))}
+        </Form.Select>
+
+        <Form.Group className="mb-3 text-white">
+          <Form.Label>Available Balance</Form.Label>
+          <Form.Control
+            type="text"
+            placeholder="Available Balance"
+            value={selectedAccount?.balance ?? '--'}
+            aria-label="Disabled input example"
+            disabled
+            readOnly
+          />
+        </Form.Group>
+
+        <Form.Group className="mb-3 text-white">
+          <Form.Label>Transfer amount</Form.Label>
+          <Form.Control
+            type="number"
+            value={transferAmount}
+            onChange={(e) => {
+              setIsValidAmount(true);
+              setTransferAmount(parseFloat(e.target.value));
+            }}
+          />
+        </Form.Group>
+
+        {!isValidAmount && (
+          <div className="mb-3 text-light border rounded border-danger text-center">
+            Invalid transfer amount
+          </div>
+        )}
+
+        <Form.Group className="mb-3 text-white">
+          <Form.Label>Reciever Address</Form.Label>
+          <Form.Control
+            type="text"
+            placeholder="Enter reciever address"
+            value={destAddress}
+            onChange={(e) => {
+              setIsValidAddress(true);
+              setDestAddress(e.target.value);
+            }}
+          />
+        </Form.Group>
+        {!isValidAddress && (
+          <div className="mb-3 text-light border rounded border-danger text-center">
+            Invalid wallet address
+          </div>
+        )}
+        <Button
+          variant="primary"
+          type="button"
+          onClick={handleTokenTransfer}
+          className="submit-btn"
+        >
+          Transfer
+        </Button>
+        <TokenAccCreationModal
+          show={ataStatus === 'INITIALIZED'}
+          handleClose={handleClose}
+          handleCreateAssociateTokenAcc={handleCreateAssociateTokenAcc}
+          recieverAddress={destAddress}
+          tokenAccountCrreationState={ataStatus}
         />
-      </Form.Group>
-      <Button variant="primary" type="button" onClick={handleTokenTransfer}>
-        Transfer
-      </Button>
-      <TokenAccCreationModal
-        show={ataStatus === 'INITIALIZED'}
-        handleClose={handleClose}
-        handleCreateAssociateTokenAcc={handleCreateAssociateTokenAcc}
-        recieverAddress={destAddress}
-        tokenAccountCrreationState={ataStatus}
-      />
-      <TokenTransferModal
-        explorerLink={explorerLink}
-        handleClose={handleClose}
-        show={ataStatus === 'SUCCESS'}
-        handleTransfer={() => {
-          setAtaStatus('COMPLETED');
-          handleTokenTransfer();
-        }}
-        recieverAddress={destAddress}
-      />
-      <TransferSuccessModal
-        explorerLink={explorerLink}
-        amount={transferAmount}
-        recieverAddress={destAddress}
-        show={transferStatus}
-        handleClose={() => {
-          setTransferStatus(false);
-        }}
-        tokenName={selectedAccount.name ?? `Token-${selectedAccount.mint}`}
-      />
-    </Form>
+        <TokenTransferModal
+          explorerLink={explorerLink}
+          handleClose={handleClose}
+          show={ataStatus === 'SUCCESS'}
+          handleTransfer={() => {
+            setAtaStatus('COMPLETED');
+            handleTokenTransfer();
+          }}
+          recieverAddress={destAddress}
+        />
+        <TransferSuccessModal
+          explorerLink={explorerLink}
+          amount={transferAmount}
+          recieverAddress={destAddress}
+          show={transferStatus}
+          handleClose={() => {
+            setTransferStatus(false);
+          }}
+          tokenName={selectedAccount.name ?? `Token-${selectedAccount.mint}`}
+        />
+      </Form>
+      <h4 className="text-white">Connect | Approve | Transfer </h4>
+      <ToastContainer />
+    </>
   );
 }
 

@@ -1,17 +1,19 @@
 import React from 'react';
 import './styles.css';
-import { WalletMultiButton } from '@solana/wallet-adapter-react-ui';
 import WalletContextProvider from '../components/WalletContextProvider';
 import AccountInfo from '../AccountInfo';
+import Header from '../Header';
 
 function App() {
   return (
-    <div className="app">
+    <>
       <WalletContextProvider cluster={'devnet'}>
-        <WalletMultiButton />
-        <AccountInfo />
+        <Header />
+        <div className="app">
+          <AccountInfo />
+        </div>
       </WalletContextProvider>
-    </div>
+    </>
   );
 }
 

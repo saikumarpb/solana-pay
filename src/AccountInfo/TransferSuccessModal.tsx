@@ -1,4 +1,5 @@
 import React from 'react';
+import './styles.css';
 import { Modal } from 'react-bootstrap';
 
 interface TransferSuccessModalProps {
