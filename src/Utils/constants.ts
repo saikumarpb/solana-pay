@@ -6,3 +6,12 @@ export declare enum WalletAdapterNetwork {
   Testnet = 'testnet',
   Devnet = 'devnet',
 }
+
+export type AssociatedTokenAccountCreationStatus =
+  | 'NOT_INITIATED'
+  | 'INITIALIZED'
+  | 'PENDING'
+  | 'SUCCESS'
+  | 'FAILED'
+  | 'COMPLETED';
+

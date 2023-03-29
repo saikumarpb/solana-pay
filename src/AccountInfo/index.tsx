@@ -1,4 +1,4 @@
-import React, { createContext, useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import './styles.css';
 import {
   Connection,
@@ -8,7 +8,7 @@ import {
   PublicKey,
   Transaction,
 } from '@solana/web3.js';
-import { Button, Form, Modal } from 'react-bootstrap';
+import { Button, Form } from 'react-bootstrap';
 import {
   createAssociatedTokenAccountInstruction,
   createTransferInstruction,
@@ -17,7 +17,10 @@ import {
   TokenAccountNotFoundError,
   TOKEN_PROGRAM_ID,
 } from '@solana/spl-token';
-import { SOLANA_LOGO_URI } from '../Utils/constants';
+import {
+  AssociatedTokenAccountCreationStatus,
+  SOLANA_LOGO_URI,
+} from '../Utils/constants';
 import { useConnection, useWallet } from '@solana/wallet-adapter-react';
 import {
   ENV,
@@ -26,7 +29,9 @@ import {
   TokenListProvider,
 } from '@solana/spl-token-registry';
 import { Metadata } from '@metaplex-foundation/mpl-token-metadata';
-import { WalletSendTransactionError } from '@solana/wallet-adapter-base';
+import TokenAccCreationModal from './TokenAccCreationModal';
+import TokenTransferModal from './TokenTransferModal';
+import TransferSuccessModal from './TransferSuccessModal';
 
 interface TokenAccount {
   owner: string;
@@ -46,8 +51,11 @@ function AccountInfo() {
   const [selectedAccount, setSelectedAccount] = useState<number>(-1);
   const [destAddress, setDestAddress] = useState('');
   const [transferAmount, setTransferAmount] = useState(0);
-  const [showTokenAccCreationModal, setShowTokenAccCreationModal] =
-    useState(false);
+  const [explorerLink, setExplorerLink] = useState('');
+  const [transferStatus, setTransferStatus] = useState(false);
+
+  const [ataStatus, setAtaStatus] =
+    useState<AssociatedTokenAccountCreationStatus>('NOT_INITIATED');
 
   useEffect(() => {
     setTokenAccounts([]);
@@ -212,22 +220,27 @@ function AccountInfo() {
         )
       );
 
-      const signature = await sendTransaction(transaction, connection);
-      console.log('Signature', signature);
+      await sendTransaction(transaction, connection).then((data) => {
+        setExplorerLink(
+          `https://explorer.solana.com/tx/${data}?cluster=devnet`
+        );
+        setTransferStatus(true);
+      });
+      setSelectedAccount(-1);
     } catch (e) {
       if (e instanceof TokenAccountNotFoundError) {
         console.log('from TokenAccountNotFoundError');
-        setShowTokenAccCreationModal(true);
+        setAtaStatus('INITIALIZED');
       }
     }
   };
 
   const handleClose = () => {
-    setShowTokenAccCreationModal(false);
+    setAtaStatus('NOT_INITIATED');
   };
 
   const handleCreateAssociateTokenAcc = async () => {
-    handleClose();
+    setAtaStatus('PENDING');
     const destPublicKey = new PublicKey(destAddress);
     const mintPublicKey = new PublicKey(tokenAccounts[selectedAccount].mint);
 
@@ -248,38 +261,17 @@ function AccountInfo() {
       )
     );
 
-    const signature = await sendTransaction(transaction, connection).then(() =>
-      // TODO: Render a modal to indicate ATA creation successful and ask user to continue with transfer
-      handleTokenTransfer()
+    const signature = await sendTransaction(transaction, connection).then(
+      (data) => {
+        setAtaStatus('SUCCESS');
+        // TODO: Render a modal to indicate ATA creation successful and ask user to continue with transfer
+        setExplorerLink(
+          `https://explorer.solana.com/tx/${data}?cluster=devnet`
+        );
+      }
     );
     console.log('Signature', signature);
   };
-
-  const renderTokenAccountCreationModal = () => (
-    <Modal show={showTokenAccCreationModal} onHide={handleClose} centered>
-      <Modal.Header closeButton>
-        <Modal.Title>Create associated token account</Modal.Title>
-      </Modal.Header>
-      <Modal.Body>
-        The reciever {destAddress} doesn't have an associated token account
-        <br />
-        <br />
-        do you want to create an associated token account for the provided
-        destination address ?
-      </Modal.Body>
-      <Modal.Footer>
-        <Button variant="secondary" onClick={handleClose}>
-          No
-          {/**
-           * TODO : Show error toast on selecting NO
-           */}
-        </Button>
-        <Button variant="primary" onClick={handleCreateAssociateTokenAcc}>
-          Yes
-        </Button>
-      </Modal.Footer>
-    </Modal>
-  );
 
   return (
     <Form className="form">
@@ -335,7 +327,38 @@ function AccountInfo() {
       <Button variant="primary" type="button" onClick={handleTokenTransfer}>
         Transfer
       </Button>
-      {renderTokenAccountCreationModal()}
+      <TokenAccCreationModal
+        show={ataStatus === 'INITIALIZED'}
+        handleClose={handleClose}
+        handleCreateAssociateTokenAcc={handleCreateAssociateTokenAcc}
+        recieverAddress={destAddress}
+        tokenAccountCrreationState={ataStatus}
+      />
+      <TokenTransferModal
+        explorerLink={explorerLink}
+        handleClose={handleClose}
+        show={ataStatus === 'SUCCESS'}
+        handleTransfer={() => {
+          setAtaStatus('COMPLETED');
+          handleTokenTransfer();
+        }}
+        recieverAddress={destAddress}
+      />
+      <TransferSuccessModal
+        explorerLink={explorerLink}
+        amount={transferAmount}
+        recieverAddress={destAddress}
+        show={transferStatus}
+        handleClose={() => {
+          setTransferStatus(false);
+        }}
+        tokenName={
+          selectedAccount === -1
+            ? ''
+            : tokenAccounts[selectedAccount].name ??
+              `Token-${tokenAccounts[selectedAccount].mint.slice(0, 10)}`
+        }
+      />
     </Form>
   );
 }
