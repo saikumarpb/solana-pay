@@ -44,11 +44,18 @@ interface TokenAccount {
 }
 
 function AccountInfo() {
+  const tokenAccInitialState = {
+    balance: 0,
+    decimalPlaces: 0,
+    mint: '',
+    owner: '',
+  };
   const { connection } = useConnection();
   const { publicKey, sendTransaction } = useWallet();
   const [tokenMap, setTokenMap] = useState<Map<string, TokenInfo>>(new Map());
   const [tokenAccounts, setTokenAccounts] = useState<TokenAccount[]>([]);
-  const [selectedAccount, setSelectedAccount] = useState<number>(-1);
+  const [selectedAccount, setSelectedAccount] =
+    useState<TokenAccount>(tokenAccInitialState);
   const [destAddress, setDestAddress] = useState('');
   const [transferAmount, setTransferAmount] = useState(0);
   const [explorerLink, setExplorerLink] = useState('');
@@ -59,7 +66,6 @@ function AccountInfo() {
 
   useEffect(() => {
     setTokenAccounts([]);
-    setSelectedAccount(-1);
     setDestAddress('');
   }, [publicKey]);
 
@@ -189,7 +195,7 @@ function AccountInfo() {
     // Generate a new wallet keypair
     const fromWallet = Keypair.generate();
 
-    const mint = new PublicKey(tokenAccounts[selectedAccount].mint);
+    const mint = new PublicKey(selectedAccount?.mint ?? '');
 
     // Get the token account of the fromWallet address, and if it does not exist, create it
     const sourceTokenAccount = await getOrCreateAssociatedTokenAccount(
@@ -215,8 +221,7 @@ function AccountInfo() {
           sourceTokenAccount.address,
           destinationTokenAccount.address,
           publicKey!!,
-          transferAmount *
-            Math.pow(10, tokenAccounts[selectedAccount].decimalPlaces)
+          transferAmount * Math.pow(10, selectedAccount?.decimalPlaces ?? 0)
         )
       );
 
@@ -226,7 +231,7 @@ function AccountInfo() {
         );
         setTransferStatus(true);
       });
-      setSelectedAccount(-1);
+      setSelectedAccount(tokenAccInitialState);
     } catch (e) {
       if (e instanceof TokenAccountNotFoundError) {
         console.log('from TokenAccountNotFoundError');
@@ -242,7 +247,7 @@ function AccountInfo() {
   const handleCreateAssociateTokenAcc = async () => {
     setAtaStatus('PENDING');
     const destPublicKey = new PublicKey(destAddress);
-    const mintPublicKey = new PublicKey(tokenAccounts[selectedAccount].mint);
+    const mintPublicKey = new PublicKey(selectedAccount?.mint ?? '');
 
     const associatedTokenAddress = await getAssociatedTokenAddress(
       mintPublicKey,
@@ -277,16 +282,16 @@ function AccountInfo() {
     <Form className="form">
       <Form.Select
         className="my-3"
-        value={selectedAccount}
+        value={JSON.stringify(selectedAccount)}
         onChange={(e) => {
-          setSelectedAccount(e.target.value as unknown as number);
+          setSelectedAccount(JSON.parse(e.target.value) as unknown as TokenAccount);
         }}
       >
         <option key={-1} value={-1}>
           Select token account
         </option>
         {tokenAccounts.map((tokenAccount, index) => (
-          <option key={index} value={index}>
+          <option key={index} value={JSON.stringify(tokenAccount)}>
             {tokenAccount.name ?? `Token-${tokenAccount.mint.slice(0, 10)}`}
           </option>
         ))}
@@ -297,7 +302,7 @@ function AccountInfo() {
         <Form.Control
           type="text"
           placeholder="Available Balance"
-          value={tokenAccounts[selectedAccount]?.balance ?? '--'}
+          value={selectedAccount?.balance ?? '--'}
           aria-label="Disabled input example"
           disabled
           readOnly
@@ -352,12 +357,7 @@ function AccountInfo() {
         handleClose={() => {
           setTransferStatus(false);
         }}
-        tokenName={
-          selectedAccount === -1
-            ? ''
-            : tokenAccounts[selectedAccount].name ??
-              `Token-${tokenAccounts[selectedAccount].mint.slice(0, 10)}`
-        }
+        tokenName={selectedAccount.name ?? `Token-${selectedAccount.mint}`}
       />
     </Form>
   );
